@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_pixel_camera::{PixelCameraPlugin, PixelViewport, PixelZoom};
+use bevy_pixel_camera::{FitType, PixelCamScalingMode, PixelCameraPlugin, PixelViewport, PixelZoom};
 
 const WIDTH: i32 = 320;
 const HEIGHT: i32 = 180;
@@ -19,7 +19,10 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>, mut texture_atl
     // inside the window.
     commands.spawn((
         Camera2dBundle::default(),
-        PixelZoom::FitSmallerDim(HEIGHT),
+        PixelZoom{
+            fit_type: FitType::FitSmallerDim(HEIGHT),
+            pixel_cam_scaling_mode: PixelCamScalingMode::AllowFloat
+        },
         PixelViewport,
     ));
 
@@ -27,7 +30,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>, mut texture_atl
 
     let texture_atlas =
         TextureAtlas::from_grid(mire_handle.clone(), Vec2::new(32.0, 32.0), 2, 2, None, None);
-        
+
     let texture_atlas_handle = texture_atlases.add(texture_atlas);
 
     // Add a mire sprite in the center of the window.
