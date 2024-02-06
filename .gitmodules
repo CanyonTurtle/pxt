@@ -1,0 +1,3 @@
+[submodule "bevy_pixel_camera"]
+	path = bevy_pixel_camera
+	url = git@github.com:CanyonTurtle/bevy_pixel_camera.git
