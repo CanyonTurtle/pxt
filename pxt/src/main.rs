@@ -1,103 +1,223 @@
-use bevy::prelude::*;
-use bevy_pixel_camera::{FitType, PixelCamScalingMode, PixelCameraPlugin, PixelViewport, PixelZoom};
+//! Shows how to create graphics that snap to the pixel grid by rendering to a texture in 2D
 
-const WIDTH: i32 = 320;
-const HEIGHT: i32 = 180;
+use bevy::{
+    prelude::*,
+    render::{
+        camera::RenderTarget,
+        render_resource::{
+            Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages
+        },
+        view::RenderLayers,
+    },
+    sprite::MaterialMesh2dBundle,
+    window::WindowResized,
+};
+
+/// In-game resolution width.
+const RES_WIDTH: u32 = 160;
+
+/// In-game resolution height.
+const RES_HEIGHT: u32 = 160;
+
+/// Default render layers for pixel-perfect rendering.
+/// You can skip adding this component, as this is the default.
+const PIXEL_PERFECT_LAYERS: RenderLayers = RenderLayers::layer(0);
+
+/// Render layers for high-resolution rendering.
+const HIGH_RES_LAYERS: RenderLayers = RenderLayers::layer(1);
+
+#[derive(Resource)]
+struct FramebufferImageHandle {
+    image_handle: Option<Handle<Image>>
+}
 
 fn main() {
     App::new()
-        .insert_resource(ClearColor(Color::rgb(0.2, 0.2, 0.2)))
         .add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()))
-        .add_plugins(PixelCameraPlugin)
-        .add_systems(Startup, setup)
-        .add_systems(Update, bevy::window::close_on_esc)
+        .insert_resource(Msaa::Off)
+        .insert_resource(FramebufferImageHandle{image_handle: None})
+        .add_systems(Startup, (setup_camera, setup_sprite, setup_mesh))
+        .add_systems(Update, (rotate, fit_canvas, draw_pixels))
         .run();
 }
 
-fn setup(mut commands: Commands, asset_server: Res<AssetServer>, mut texture_atlases: ResMut<Assets<TextureAtlas>>) {
-    // Add a camera that will always fit the virtual resolution WIDTH x HEIGHT
-    // inside the window.
+/// Low-resolution texture that contains the pixel-perfect world.
+/// Canvas itself is rendered to the high-resolution world.
+#[derive(Component)]
+struct Canvas;
+
+/// Camera that renders the pixel-perfect world to the [`Canvas`].
+#[derive(Component)]
+struct InGameCamera;
+
+/// Camera that renders the [`Canvas`] (and other graphics on [`HIGH_RES_LAYERS`]) to the screen.
+#[derive(Component)]
+struct OuterCamera;
+
+#[derive(Component)]
+struct Rotate;
+
+fn setup_sprite(mut commands: Commands, asset_server: Res<AssetServer>) {
+    // the sample sprite that will be rendered to the pixel-perfect canvas
     commands.spawn((
-        Camera2dBundle::default(),
-        PixelZoom{
-            fit_type: FitType::FitSmallerDim(HEIGHT),
-            pixel_cam_scaling_mode: PixelCamScalingMode::AllowFloat
+        SpriteBundle {
+            texture: asset_server.load("bevy_pixel_dark.png"),
+            transform: Transform::from_xyz(-40., 20., 2.),
+            ..default()
         },
-        PixelViewport,
+        Rotate,
+        PIXEL_PERFECT_LAYERS,
     ));
 
-    let mire_handle = asset_server.load("mire-64x64.png");
-
-    let texture_atlas =
-        TextureAtlas::from_grid(mire_handle.clone(), Vec2::new(32.0, 32.0), 2, 2, None, None);
-
-    let texture_atlas_handle = texture_atlases.add(texture_atlas);
-
-    // Add a mire sprite in the center of the window.
-    commands.spawn(SpriteBundle {
-        texture: mire_handle.clone(),
-        transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
-        ..Default::default()
-    });
-
-    // Add a mire sprite in the bottom-left corner of our virtual resolution.
-    commands.spawn(SpriteBundle {
-        texture: mire_handle.clone(),
-        transform: Transform::from_translation(Vec3::new(
-            -(WIDTH / 2) as f32,
-            -(HEIGHT / 2) as f32,
-            0.0,
-        )),
-        ..Default::default()
-    });
-
-    // Add a mire sprite in the bottom-right corner of our virtual resolution.
-    commands.spawn(SpriteBundle {
-        texture: mire_handle.clone(),
-        transform: Transform::from_translation(Vec3::new(
-            (WIDTH / 2) as f32,
-            -(HEIGHT / 2) as f32,
-            0.0,
-        )),
-        ..Default::default()
-    });
-
-    // Add a mire sprite in the top-left corner of our virtual resolution.
-    commands.spawn(SpriteBundle {
-        texture: mire_handle.clone(),
-        transform: Transform::from_translation(Vec3::new(
-            -(WIDTH / 2) as f32,
-            (HEIGHT / 2) as f32,
-            0.0,
-        )),
-        ..Default::default()
-    });
-
-    // Add a mire sprite in the top-right corner of our virtual resolution.
-    // commands.spawn(SpriteSheetBundle {
-    //     texture_atlas: texture_atlas_handle.clone(),
-    //     transform: Transform::from_translation(Vec3::new(
-    //         (WIDTH / 2) as f32 - 32.,
-    //         (HEIGHT / 2) as f32 - 32.,
-    //         0.0,
-    //     )),
-    //     sprite: TextureAtlasSprite{index: 1, anchor: bevy::sprite::Anchor::BottomLeft, ..Default::default()},
-    //     ..Default::default()
-    // });
-    commands.spawn(SpriteBundle {
-        sprite: Sprite {
-            rect: Some(Rect{
-                min: Vec2{x: 0., y: 0.},
-                max: Vec2{x: 32., y: 32.},
-            }),
-            ..Default::default()
+    // the sample sprite that will be rendered to the high-res "outer world"
+    commands.spawn((
+        SpriteBundle {
+            texture: asset_server.load("bevy_pixel_light.png"),
+            transform: Transform::from_xyz(-40., -20., 2.),
+            ..default()
         },
-        texture: mire_handle.clone(),
-        transform: Transform::from_translation(Vec3::new(
-            (WIDTH / 2) as f32,
-            (HEIGHT / 2) as f32,
-            0.0,
-        )),
-        ..Default::default()
-    });
+        Rotate,
+        HIGH_RES_LAYERS,
+    ));
 }
+
+/// Spawns a capsule mesh on the pixel-perfect layer.
+fn setup_mesh(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
+    commands.spawn((
+        MaterialMesh2dBundle {
+            mesh: meshes.add(shape::Capsule::default().into()).into(),
+            transform: Transform::from_xyz(40., 0., 2.).with_scale(Vec3::splat(32.)),
+            material: materials.add(Color::BLACK.into()),
+            ..default()
+        },
+        Rotate,
+        PIXEL_PERFECT_LAYERS,
+    ));
+}
+
+fn setup_camera(mut commands: Commands, mut images: ResMut<Assets<Image>>, mut im_h: ResMut<FramebufferImageHandle>) {
+    let canvas_size = Extent3d {
+        width: RES_WIDTH,
+        height: RES_HEIGHT,
+        ..default()
+    };
+
+    // this Image serves as a canvas representing the low-resolution game screen
+    let mut canvas = Image {
+        texture_descriptor: TextureDescriptor {
+            label: None,
+            size: canvas_size,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Bgra8UnormSrgb,
+            mip_level_count: 1,
+            sample_count: 1,
+            usage: TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        },
+        ..default()
+    };
+
+    // fill image.data with zeroes
+    canvas.resize(canvas_size);
+
+    let image_handle = images.add(canvas);
+
+    im_h.as_mut().image_handle = Some(image_handle.clone());
+
+    // this camera renders whatever is on `PIXEL_PERFECT_LAYERS` to the canvas
+    commands.spawn((
+        Camera2dBundle {
+            camera: Camera {
+                // render before the "main pass" camera
+                order: -1,
+                target: RenderTarget::Image(image_handle.clone()),
+                ..default()
+            },
+            ..default()
+        },
+        InGameCamera,
+        PIXEL_PERFECT_LAYERS,
+    ));
+
+    // spawn the canvas
+    commands.spawn((
+        SpriteBundle {
+            texture: image_handle,
+            ..default()
+        },
+        Canvas,
+        HIGH_RES_LAYERS,
+    ));
+
+    // the "outer" camera renders whatever is on `HIGH_RES_LAYERS` to the screen.
+    // here, the canvas and one of the sample sprites will be rendered by this camera
+    commands.spawn((Camera2dBundle::default(), OuterCamera, HIGH_RES_LAYERS));
+
+    
+}
+
+/// Rotates entities to demonstrate grid snapping.
+fn rotate(time: Res<Time>, mut transforms: Query<&mut Transform, With<Rotate>>) {
+    for mut transform in &mut transforms {
+        let dt = time.delta_seconds();
+        transform.rotate_z(dt);
+    }
+}
+
+/// Rotates entities to demonstrate grid snapping.
+fn draw_pixels(mut images: ResMut<Assets<Image>>, mut im_h: ResMut<FramebufferImageHandle>) {
+    match &im_h.as_mut().image_handle {
+        Some(imh) => {
+            // error!("changing image");
+            let data = &mut images.get_mut(imh).unwrap().data;
+            for i in 0..data.len() {
+                data[i] = 0xff;//((*byte as u32 + i as u32 * 50) % 255) as u8;
+                // error!("{}", data[i])
+            }
+        },
+        None => panic!()
+    }
+    
+}
+
+/// Scales camera projection to fit the window (integer multiples only).
+fn fit_canvas(
+    mut resize_events: EventReader<WindowResized>,
+    mut projections: Query<&mut OrthographicProjection, With<OuterCamera>>,
+) {
+    for event in resize_events.read() {
+        let h_scale = event.width / RES_WIDTH as f32;
+        let v_scale = event.height / RES_HEIGHT as f32;
+        let mut projection = projections.single_mut();
+        projection.scale = 1. / h_scale.min(v_scale);
+    }
+}
+
+
+// use bevy::prelude::*;
+// use bevy_pixel_buffer::prelude::*;
+
+// fn main() {
+//     let size = PixelBufferSize {
+//         size: UVec2::new(320, 160),       // amount of pixels
+//         pixel_size: UVec2::new(16, 16), // size of each pixel in the screen
+//     };
+
+//     App::new()
+//         .add_plugins(DefaultPlugins)
+//         .add_plugins(PixelBufferPlugin)  // Add this plugin
+//         .add_systems(Startup, pixel_buffer_setup(size)) // Setup system
+//         .add_systems(Update, update)
+//         .run()
+// }
+
+// fn update(mut pb: QueryPixelBuffer) {
+//     // Set each pixel to a random color
+//     pb.frame().per_pixel(|_, _| Pixel::random());
+// }

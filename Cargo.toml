@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "pxt",
-    "bevy_pixel_camera"
 ]
 resolver = "2"
 

@@ -773,13 +773,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy_pixel_camera"
-version = "0.12.1"
-dependencies = [
- "bevy",
-]
-
-[[package]]
 name = "bevy_ptr"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2720,7 +2713,7 @@ name = "pxt"
 version = "0.1.0"
 dependencies = [
  "bevy",
- "bevy_pixel_camera",
+ "bytemuck",
 ]
 
 [[package]]
